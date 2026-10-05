@@ -11,7 +11,7 @@ Implementación de una infraestructura segmentada y protegida mediante **FortiGa
 
 ## 🎥 Video de demostración
 
-> Agregar aquí el enlace del video de Infraestructura 1.
+▶️ [Ver video de demostración de la Infraestructura 1](https://youtu.be/D7PI3ZJBzGU)
 
 ---
 
