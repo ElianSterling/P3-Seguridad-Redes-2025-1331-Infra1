@@ -22,25 +22,19 @@ Diseñar e implementar una infraestructura de red con segmentación lógica y co
 - Separar usuarios restringidos y privilegiados mediante VLANs.
 - Alojar servidores críticos dentro de una DMZ.
 - Impedir fugas de tráfico desde la DMZ hacia las LAN.
-- Restringir el acceso de usuarios de VLAN10 al servidor de inventario.
-- Permitir acceso SSH a servidores únicamente desde VLAN20.
-- Restringir el acceso general a Internet desde la DMZ, permitiendo únicamente DNS y endpoints necesarios para actualizaciones Debian.
-- Aplicar medidas básicas de hardening en el switch de acceso.
+- Restringir el acceso de VLAN10 al servidor de inventario.
+- Permitir acceso SSH a los servidores únicamente desde VLAN20.
+- Restringir el acceso general a Internet desde la DMZ.
+- Permitir únicamente DNS y los endpoints necesarios para actualizaciones Debian.
+- Aplicar hardening básico en el switch de acceso.
 
 ---
 
 ## 🏗️ Topología
 
-La infraestructura utiliza:
+La infraestructura utiliza **FortiGate**, un **switch Cisco IOSvL2**, dos VLAN de usuarios, tres servidores en DMZ y clientes de prueba ejecutados dentro del laboratorio GNS3/Proxmox.
 
-- 1 FortiGate
-- 1 switch Cisco IOSvL2
-- 2 VLAN de usuarios
-- 3 servidores en DMZ
-- 1 cliente Windows de pruebas
-- GNS3 integrado con Proxmox
-
-> El diagrama de topología se agregará en la carpeta `diagrams/`.
+![Topología GNS3 de Infraestructura 1](diagrams/topologia-gns3-infra1.webp)
 
 ---
 
@@ -64,16 +58,24 @@ La infraestructura utiliza:
 
 ## 🔥 FortiGate
 
-### Interfaces principales
+### Interfaces y segmentación
 
-- **port1 / WAN-MGMT:** acceso de administración y salida WAN.
+- **WAN-MGMT / port1:** administración y salida WAN.
 - **VLAN10-USERS:** VLAN ID 10 — `10.31.10.1/25`.
 - **VLAN20-ADMIN:** VLAN ID 20 — `10.31.20.1/25`.
 - **P3-INFRA1-DMZ / port3:** `10.31.30.1/28`.
 
+![Interfaces finales de FortiGate](screenshots/fortigate/01-interfaces-finales.webp)
+
+### Objetos de red
+
+Se crearon objetos para los hosts de la DMZ, la red DMZ, DNS autorizado, repositorios Debian y el grupo de servidores.
+
+![Objetos de direcciones de FortiGate](screenshots/fortigate/02-objetos-direcciones.webp)
+
 ### DHCP
 
-FortiGate entrega direccionamiento dinámico para las dos VLAN de usuarios:
+FortiGate entrega direccionamiento dinámico a las dos VLAN:
 
 - VLAN10: `10.31.10.20 - 10.31.10.120`
 - VLAN20: `10.31.20.20 - 10.31.20.120`
@@ -87,7 +89,7 @@ FortiGate entrega direccionamiento dinámico para las dos VLAN de usuarios:
 | Política | Acción | Propósito |
 |---|---|---|
 | `DMZ-ALLOW-DNS` | ACCEPT | Permitir DNS hacia Cloudflare |
-| `DMZ-ALLOW-DEBIAN-UPDATES` | ACCEPT | Permitir actualizaciones desde repositorios Debian autorizados |
+| `DMZ-ALLOW-DEBIAN-UPDATES` | ACCEPT | Permitir actualizaciones de Debian |
 | `DMZ-DENY-INTERNET` | DENY | Bloquear el resto del acceso a Internet |
 
 ### DMZ → LAN
@@ -113,6 +115,10 @@ Estas reglas evitan que los servidores de la DMZ puedan iniciar tráfico hacia l
 |---|---|
 | `VLAN20-ALLOW-SSH` | Permite SSH hacia los tres servidores de la DMZ |
 
+### Vista final de políticas
+
+![Políticas finales de FortiGate](screenshots/fortigate/03-politicas-firewall-finales.webp)
+
 ---
 
 ## 🔀 Switch Cisco – SW-INFRA1
@@ -128,17 +134,25 @@ Estas reglas evitan que los servidores de la DMZ puedan iniciar tráfico hacia l
 ### Trunk
 
 - **Gi0/0**
-- Encapsulación: **802.1Q**
+- Encapsulación **802.1Q**
 - VLAN permitidas: **10,20**
+
+![VLANs y trunk del switch](screenshots/switch/01-vlans-y-trunk.webp)
 
 ### Hardening aplicado
 
 - PortFast en puertos de acceso.
 - BPDU Guard en puertos de acceso.
-- Port-Security con máximo de 1 MAC.
-- Modo de violación: `restrict`.
-- Puertos no utilizados asignados a VLAN999.
-- Puertos no utilizados administrativamente apagados.
+- Port-Security con máximo de 1 dirección MAC.
+- Modo de violación `restrict`.
+- Puertos sin uso asignados a VLAN999.
+- Puertos sin uso administrativamente apagados.
+
+![Port-Security y hardening](screenshots/switch/02-port-security-hardening.webp)
+
+La configuración completa se encuentra en:
+
+[`configs/SW-INFRA1-running-config.txt`](configs/SW-INFRA1-running-config.txt)
 
 ---
 
@@ -146,74 +160,104 @@ Estas reglas evitan que los servidores de la DMZ puedan iniciar tráfico hacia l
 
 ### VLAN10 – USERS-RESTRICTED
 
-Cliente de pruebas:
+Cliente de pruebas: `10.31.10.21/25`.
 
-- IP obtenida por DHCP: `10.31.10.21/25`
+#### Acceso permitido a WEB-CAJA
 
-Resultados:
+![Acceso HTTP permitido desde VLAN10 hacia WEB-CAJA](screenshots/vlan10/01-web-caja-permitido.webp)
 
-- ✅ Acceso HTTP a `10.31.30.2` — WEB-CAJA
-- ❌ Acceso HTTP a `10.31.30.3` — WEB-INVENTARIO
-- ❌ Acceso SSH a servidores DMZ
-- ✅ FortiGate registra los bloqueos como **policy violation**
+#### Acceso bloqueado a WEB-INVENTARIO
 
-### VLAN20 – USERS-PRIVILEGED
+![Inventario bloqueado desde VLAN10](screenshots/vlan10/02-inventario-bloqueado.webp)
 
-Cliente de pruebas:
+#### SSH bloqueado desde VLAN10
 
-- IP obtenida por DHCP: `10.31.20.21/25`
+![SSH bloqueado desde VLAN10](screenshots/vlan10/03-ssh-bloqueado.webp)
 
-Resultados:
+Los eventos también quedan registrados por FortiGate como **policy violation**:
 
-- ✅ SSH a `10.31.30.2`
-- ✅ SSH a `10.31.30.3`
-- ✅ SSH a `10.31.30.4`
-- ✅ Sesión SSH real establecida con WEB-CAJA
-- ✅ FortiGate registra el tráfico mediante `VLAN20-ALLOW-SSH`
-
-### Restricción de Internet desde la DMZ
-
-Resultados:
-
-- ✅ Resolución DNS autorizada.
-- ✅ `apt update` funciona contra los repositorios Debian autorizados.
-- ❌ Acceso general a Internet bloqueado.
-- ❌ Tráfico no autorizado registrado por `DMZ-DENY-INTERNET`.
+![Logs de tráfico denegado](screenshots/fortigate/05-logs-trafico-denegado.webp)
 
 ---
 
-## 🗂️ Estructura del repositorio
+### VLAN20 – USERS-PRIVILEGED
+
+Cliente de pruebas: `10.31.20.21/25`.
+
+#### Puerto SSH permitido
+
+![Puerto 22 permitido desde VLAN20](screenshots/vlan20/01-ssh-puerto22-permitido.webp)
+
+#### Sesión SSH real
+
+![Sesión SSH desde VLAN20 hacia WEB-CAJA](screenshots/vlan20/02-sesion-ssh-real.webp)
+
+FortiGate registra el tráfico permitido mediante la política `VLAN20-ALLOW-SSH`:
+
+![Logs de tráfico permitido](screenshots/fortigate/04-logs-trafico-permitido.webp)
+
+---
+
+## 🖥️ DMZ
+
+### Actualizaciones Debian autorizadas
+
+El servidor DB01 puede consultar los repositorios Debian autorizados y ejecutar `apt update`.
+
+![APT Update autorizado](screenshots/dmz/01-apt-update-autorizado.webp)
+
+### Internet general bloqueado
+
+Las pruebas hacia destinos no autorizados fallan según lo esperado.
+
+![Internet general bloqueado desde DMZ](screenshots/dmz/02-internet-general-bloqueado.webp)
+
+### Evidencia en logs
+
+![Logs DMZ allow y deny](screenshots/dmz/03-logs-dmz-allow-deny.webp)
+
+### Base de datos
+
+DB01 ejecuta **MariaDB 10.11.18** y mantiene el servicio activo.
+
+![MariaDB en DB01](screenshots/dmz/04-mariadb-db01.webp)
+
+### Conectividad interna entre servidores
+
+![Conectividad entre servidores de la DMZ](screenshots/dmz/05-conectividad-servidores.webp)
+
+---
+
+## 📂 Estructura del repositorio
 
 ```text
 P3-Seguridad-Redes-2025-1331-Infra1/
 ├── README.md
-├── docs/
-├── diagrams/
-├── screenshots/
-│   ├── fortigate/
-│   ├── switch/
-│   ├── vlan10/
-│   ├── vlan20/
-│   ├── dmz/
-│   └── pruebas/
 ├── configs/
-└── scripts/
+│   └── SW-INFRA1-running-config.txt
+├── diagrams/
+│   └── topologia-gns3-infra1.webp
+└── screenshots/
+    ├── dmz/
+    ├── fortigate/
+    ├── switch/
+    ├── vlan10/
+    └── vlan20/
 ```
-
----
-
-## 📁 Configuraciones
-
-La carpeta `configs/` contendrá, entre otros archivos:
-
-- `SW-INFRA1-running-config.txt`
-
-La configuración del FortiGate se documenta principalmente mediante capturas de la GUI y evidencias de las políticas y logs.
 
 ---
 
 ## ✅ Resultado
 
-La Infraestructura 1 implementa segmentación mediante VLANs, aislamiento de servidores en DMZ, restricciones de acceso por origen y servicio, control de salida a Internet, registros de violaciones de política y hardening básico del switch.
+La Infraestructura 1 implementa correctamente:
 
-Las pruebas realizadas confirman que las políticas de seguridad se aplican correctamente y que cada segmento posee únicamente los accesos definidos para su función.
+- segmentación mediante VLANs;
+- aislamiento de servidores en una DMZ;
+- restricciones de acceso por origen y servicio;
+- acceso SSH exclusivo desde VLAN20;
+- acceso selectivo desde VLAN10;
+- control de salida a Internet desde la DMZ;
+- logging de tráfico permitido y denegado;
+- hardening básico del switch.
+
+Las pruebas documentadas y el video de demostración verifican el funcionamiento de los controles implementados.
